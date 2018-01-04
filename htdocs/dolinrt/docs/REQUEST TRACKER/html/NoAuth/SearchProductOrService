@@ -1,0 +1,99 @@
+
+% print $json_text; 
+
+<%ARGS>
+$term => undef
+$response => undef
+$json_text => undef
+</%ARGS>
+
+<%INIT>
+
+# ----------------- Fake proxy for CrosDomain problem
+#use HTTP::Request;
+#use LWP::UserAgent;
+#use Data::Dumper;
+
+use SOAP::Lite +trace => [ transport => \&log_message ];
+use MIME::Entity;
+use HTTP::Cookies;
+use HTTP::Message;
+use HTTP::Response;
+use HTTP::Request;
+use Data::Dumper;
+
+
+sub log_message {
+
+    return 1 if ( RT->Config->Get( 'LogToFile' ) ne 'debug' );
+
+    my ($in) = @_;
+    if ( $in->isa("HTTP::Response") ) {
+        open(FILE,">/tmp/RT-Response-oeris_productorservice.log");
+        print FILE $in->content;
+        close (FILE);
+    }elsif ( $in->isa("HTTP::Request") ) {
+        open(FILE,">/tmp/RT-Request-oeris_productorservice.log");
+        print FILE $in->content;
+        close (FILE);
+    }
+}
+
+
+$ENV{'PERL_LWP_SSL_VERIFY_HOSTNAME'} = 0;
+
+
+
+if (!defined $term) {
+  $RT::Logger->error ( "Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_productorservice.php#getProductOrService' : arguments 'term' is mandatory" ); 
+} else {
+  
+  
+  my $soap = SOAP::Lite->proxy(RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_productorservice.php', timeout => 5);
+  $soap->serializer->namespaces->{"ns"} = "xmlns:ns";
+  $soap->autotype( 0 );
+  $soap->soapversion( '1.1' );
+  $soap->ns( 'http://www.dolibarr.org/ns/', 'ns' );
+  $soap->envprefix( 'soapenv' );
+  
+  my $header = SOAP::Header->type( 'xml' => '' );
+  
+  
+  my $auth = SOAP::Data->type("ns:authentication")->name('authentication' => \SOAP::Data->value(
+                                                                   SOAP::Data->name('dolibarrkey')->value(RT->Config->Get( 'DolibarrKey' )),
+                                                                   SOAP::Data->name('sourceapplication')->value('Request Tracker'),
+                                                                   SOAP::Data->name('login')->value(RT->Config->Get( 'DolibarrLogin' )),
+                                                                   SOAP::Data->name('password')->value(RT->Config->Get( 'DolibarrPassword' )),
+                                                                   SOAP::Data->name('entity')->value('')
+                                                                  )
+                                                      );
+  
+  my $som = $soap->call('getProductOrService',
+                    $header,
+                    $auth,
+                    SOAP::Data->name('ref')->value($term)
+  );
+  
+  #---- Erreur dans le retour du WS
+  if ( $som->fault ) {
+    $RT::Logger->error ( "Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_productorservice.php#getProductOrService' :" . $som->fault->{faultstring} );
+  } else {
+    $RT::Logger->debug ( "Webservice result '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_productorservice.php#getProductOrService' :" . Dumper($som->result) );
+    if ($som->result->{'result_code'} eq 'OK'){
+      $json_text = '['; 
+      $RT::Logger->debug ( "Webservice result '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_productorservice.php#getProductOrService' :" . Dumper($som->paramsout) );
+      foreach my $contact (@{$som->paramsout}){                                                                                                                                
+        $json_text .= '{"id":"'.$contact->{"id"}.'","ref":"'.$contact->{"ref"}.'","label":"'.$contact->{"label"}.'","price_net":"'.$contact->{"price_net"}.'","price":"'.$contact->{"price"}.'"},';
+      }
+      $json_text =~ s/(.*),$/$1/;
+      $json_text .= ']';
+      
+    } elsif ($som->result->{'result_code'} eq 'INFO') {
+      $RT::Logger->info ( RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_productorservice.php#getProductOrService' says :" . $som->result->{'result_label'} );   
+    }else {
+      $RT::Logger->error ( "Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_productorservice.php#getProductOrService' :" . $som->result->{'result_label'} );  
+    }
+  }
+}
+
+</%INIT>

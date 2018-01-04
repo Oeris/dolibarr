@@ -1081,13 +1081,17 @@ class Commande extends CommonOrder
      *  @param      Object			$object 	        Object source
      *  @return     int             					<0 if KO, 0 if nothing done, 1 if OK
      */
-    function createFromProposal($object)
+    function createFromProposal($object,$remoteUser=0)
     {
         global $conf,$user,$hookmanager;
 
 		dol_include_once('/core/class/extrafields.class.php');
 
         $error=0;
+
+	if(!empty($remoteUser)) {
+		$user = $remoteUser;
+	}
 
 
         $this->date_commande = dol_now();

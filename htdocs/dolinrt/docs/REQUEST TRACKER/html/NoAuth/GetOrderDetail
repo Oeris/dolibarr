@@ -1,0 +1,119 @@
+
+% print $html_text; 
+
+<%ARGS>
+$ref_command => undef
+$response => undef
+$html_text => undef
+</%ARGS>
+
+<%INIT>
+
+# ----------------- Fake proxy for CrosDomain problem
+#use HTTP::Request;
+#use LWP::UserAgent;
+#use Data::Dumper;
+
+use SOAP::Lite +trace => [ transport => \&log_message ];
+use MIME::Entity;
+use HTTP::Cookies;
+use HTTP::Message;
+use HTTP::Response;
+use HTTP::Request;
+use Data::Dumper;
+
+
+sub log_message {
+
+    return 1 if ( RT->Config->Get( 'LogToFile' ) ne 'debug' );
+
+    my ($in) = @_;
+    if ( $in->isa("HTTP::Response") ) {
+        open(FILE,">/tmp/RT-Response-oeris_order.log");
+        print FILE $in->content;
+        close (FILE);
+    }elsif ( $in->isa("HTTP::Request") ) {
+        open(FILE,">/tmp/RT-Request-oeris_order.log");
+        print FILE $in->content;
+        close (FILE);
+    }
+}
+
+
+$ENV{'PERL_LWP_SSL_VERIFY_HOSTNAME'} = 0;
+
+
+
+if (!defined $ref_command) {
+  $RT::Logger->error ( "Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_order.php#getOrders' : arguments 'ref_command' is mandatory" ); 
+} else {
+  
+  
+  my $soap = SOAP::Lite->proxy(RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_order.php', timeout => 10);
+  $soap->serializer->namespaces->{"ns"} = "xmlns:ns";
+  $soap->autotype( 0 );
+  $soap->soapversion( '1.1' );
+  $soap->ns( 'http://www.dolibarr.org/ns/', 'ns' );
+  $soap->envprefix( 'soapenv' );
+  
+  my $header = SOAP::Header->type( 'xml' => '' );
+  
+  
+  my $auth = SOAP::Data->type("ns:authentication")->name('authentication' => \SOAP::Data->value(
+                                                                   SOAP::Data->name('dolibarrkey')->value(RT->Config->Get( 'DolibarrKey' )),
+                                                                   SOAP::Data->name('sourceapplication')->value('Request Tracker'),
+                                                                   SOAP::Data->name('login')->value(RT->Config->Get( 'DolibarrLogin' )),
+                                                                   SOAP::Data->name('password')->value(RT->Config->Get( 'DolibarrPassword' )),
+                                                                   SOAP::Data->name('entity')->value('')
+                                                                  )
+                                                      );
+  
+  my $som = $soap->call('getOrders',
+                    $header,
+                    $auth,
+                    SOAP::Data->name('ref')->value($ref_command)
+  );
+  
+  #---- Erreur dans le retour du WS
+  if ( $som->fault ) {
+    $RT::Logger->error ( "Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_order.php#getOrders' :" . $som->fault->{faultstring} );
+  } else {
+    $RT::Logger->debug ( "Webservice result '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_order.php#getOrders' :" . Dumper($som->result) );
+    if ($som->result->{'result_code'} eq 'OK'){
+      $RT::Logger->debug ( "Webservice result '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_order.php#getOrders' :" . Dumper($som->paramsout) );
+            
+      my $total = 0;
+      my $order_id = undef;
+
+      $html_text = '<table>';
+      foreach my $item (@{$som->paramsout}){
+        $total += ($item->{"price"}*$item->{"qty"});
+        $order_id = $item->{"cmdid"};
+        $html_text .= '<tr class="date "><td class="label">&nbsp;</td><td align="right" class="">'.$item->{"ref"}.'&nbsp; x &nbsp;'.$item->{"qty"}.'&nbsp; = &nbsp;'.sprintf("%02d", ($item->{"price"}*$item->{"qty"})).'&euro; ttc</td><td class="">&nbsp;<input type="submit" class="buttons delete" value="-" name="deleteitem_'.$item->{"id"}.'" id="deleteitem_'.$item->{"id"}.'"></td></tr>';                                                                                                                                      
+        if($item->{"label"} ne $item->{"ref"}) {
+          $html_text .= '<tr class="date "><td class="label">&nbsp;</td><td align="right" class="">'.$item->{"label"}.'&nbsp; </td><td class="">&nbsp;&nbsp;</td></tr>';
+        }
+      }
+
+      $html_text .= '<tr class="date "><td class="label">&nbsp;</td><td class=""><input type="hidden" name="contact_id" id="contact_id" value=""><input type="hidden" name="productid" id="productid" value=""><input type="text" name="refproduit" id="refproduit" size="30" class="refproduit" value="">&nbsp; x &nbsp;<input type="number" min="1" max="100" step="1" name="qty" id="qty" class="qty" value="1" required="true"></td><td class="">&nbsp;<input type="submit" class="buttons add"  value="+" name="orderaddproduct" id="orderaddproduct"></td></tr>';
+      
+      $html_text .= '<tr class="date "><td colspan="3"><hr></td></tr>';
+      $html_text .= '<tr class="date "><td class="label">&nbsp;</td><td align="right" class="">Total &nbsp; = &nbsp;</td><td class="">'.$total.'&euro; ttc</td></tr>';
+      $html_text .= '<tr class="date "><td colspan="3">&nbsp;</td></tr>';
+      $html_text .= '</table>';
+      
+      $html_text .= '<div style="font-size:small;"><a href="#" id="createinvoicefromorder"><strong>Cr&eacute;er une facture a partir de cette commande</strong></a></div><br><br>';
+      if(defined($order_id)){
+        $html_text .= '<div id="orderlink" style="display:none"><strong>D&eacute;tails de la commande num&eacute;ro <a href="'.RT->Config->Get( 'DolibarrURL' ).'/commande/card.php?id='.$order_id.'" target="_blank">'.$ref_command.'</strong></a>&nbsp;<a id="download-order" target="_blank" href="'.RT->Config->Get('DolibarrURL').'/dolinrt/oeris_get_document.php?modulepart=order&file='.$ref_command.'/'.$ref_command.'.pdf&dolibarrkey='.RT->Config->Get('DolibarrKey').'&login='.RT->Config->Get('DolibarrLogin').'"><img src="/static/images/dl-pdf.png" height="25px" width="25px" style="vertical-align:middle;" alt="Download PDF"></a></div>';
+      }
+      
+    } elsif ($som->result->{'result_code'} eq 'INFO') {
+      $RT::Logger->info ( RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_order.php#getOrders' says :" . $som->result->{'result_label'} );   
+    }else {
+      $RT::Logger->error ( "Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_order.php#getOrders' :" . $som->result->{'result_label'} ); 
+      $html_text .= '<div id="no-order" style="font-size:small;font-color:red"><strong>Aucune commande ne correspond &agrave; la r&eacute;f&eacute;rence '.$ref_command.'</strong></div><br><br>'; 
+    }
+  }
+}
+
+</%INIT>

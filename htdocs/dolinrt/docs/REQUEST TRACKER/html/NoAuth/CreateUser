@@ -1,0 +1,249 @@
+
+% print $json_text; 
+
+<%ARGS>
+$thirdparty_name => undef
+$email => undef
+$name => undef
+$firstname => undef
+$phone_pro => undef
+$phone_mobile => undef
+$phone_perso => undef
+$json_text => undef
+</%ARGS>
+
+<%INIT>
+
+
+use SOAP::Lite +trace => [ transport => \&log_message ];
+use MIME::Entity;
+use HTTP::Cookies;
+use HTTP::Message;
+use HTTP::Response;
+use HTTP::Request;
+use Data::Dumper;
+
+
+sub log_message {
+
+    return 1 if ( RT->Config->Get( 'LogToFile' ) ne 'debug' );
+
+    my ($in) = @_;
+    if ( $in->isa("HTTP::Response") ) {
+        open(FILE,">/tmp/RT-Response-oeris_user.log");
+        print FILE $in->content;
+        close (FILE);
+    }elsif ( $in->isa("HTTP::Request") ) {
+        open(FILE,">/tmp/RT-Request-oeris_user.log");
+        print FILE $in->content;
+        close (FILE);
+    }
+    
+}
+
+
+$ENV{'PERL_LWP_SSL_VERIFY_HOSTNAME'} = 0;
+
+
+
+if (!defined $email || !defined $phone_pro) {
+  $RT::Logger->error ( "Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_user.php#createUserFromThirdparty' : arguments 'email', 'phone_pro' are mandatory" ); 
+} else {
+
+  $phone_mobile = $phone_pro if (!defined $phone_mobile || $phone_mobile eq 'undefined');
+  $phone_perso  = $phone_pro if (!defined $phone_perso || $phone_mobile eq 'undefined');
+  
+  my $som = undef;
+  my $soap = undef;
+  my $thirdparty = undef;
+   
+ 
+  
+  my $header = SOAP::Header->type( 'xml' => '' );
+  
+  
+  my $auth = SOAP::Data->type("ns:authentication")->name('authentication' => \SOAP::Data->value(
+                                                                     SOAP::Data->name('dolibarrkey')->value(RT->Config->Get( 'DolibarrKey' )),
+                                                                     SOAP::Data->name('sourceapplication')->value('Request Tracker'),
+                                                                     SOAP::Data->name('login')->value(RT->Config->Get( 'DolibarrLogin' )),
+                                                                     SOAP::Data->name('password')->value(RT->Config->Get( 'DolibarrPassword' )),
+                                                                     SOAP::Data->name('entity')->value('')
+                                                                    )
+                                                      );
+  
+  
+  #---- Creation de la societe a partir de la societe si elle n'existe pas
+  if (defined $thirdparty_name && $thirdparty_name ne ''){
+    $soap = SOAP::Lite->proxy(RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_thirdparty.php', timeout => 10);
+    $soap->serializer->namespaces->{"ns"} = "xmlns:ns";
+    $soap->autotype( 0 );
+    $soap->soapversion( '1.1' );
+    $soap->ns( 'http://www.dolibarr.org/ns/', 'ns' );
+    $soap->envprefix( 'soapenv' );
+  
+    $thirdparty = SOAP::Data->type("ns:thirdparty")->name('thirdparty' => \SOAP::Data->value(
+                                                                    SOAP::Data->type("xsd:string")->name('ref')->value($thirdparty_name),
+                                                                    SOAP::Data->type("xsd:string")->name('name')->value($thirdparty_name),
+                                                                    SOAP::Data->type("xsd:string")->name('status')->value(1),
+                                                                    SOAP::Data->type("xsd:string")->name('client')->value(1),
+                                                                    SOAP::Data->type("xsd:string")->name('supplier')->value(0),
+                                                                    SOAP::Data->type("xsd:string")->name('phone')->value($phone_pro),
+                                                                    SOAP::Data->type("xsd:string")->name('email')->value($email),
+                                                                    SOAP::Data->type("xsd:string")->name('vat_used')->value(1)
+                                                                    )
+                                                    );                                                      
+  
+    $som = $soap->call('createThirdParty',
+                      $header,
+                      $auth,
+                      $thirdparty
+    );
+    
+    #---- Erreur dans le retour du WS
+    if ( $som->fault ) {
+      $RT::Logger->error ( "Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_thirdparty.php#createThirdParty' :" . $som->fault->{faultstring} );
+      $json_text = '{"error":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_thirdparty.php#createThirdParty :' . $som->fault->{faultstring} .'"}'; 
+    } else {
+      $RT::Logger->debug ( "Webservice result '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_thirdparty.php#createThirdParty' :" . Dumper($som->result) );
+      if ($som->result->{'result_code'} eq 'OK'){  
+        $RT::Logger->debug ( "Webservice result '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_thirdparty.php#createThirdParty' : creation de la societe OK" );  
+        $json_text = '{"status":"'.$som->result->{'result_code'}.'","label":"'.$som->result->{'result_label'}.'"}';
+      } elsif ($som->result->{'result_code'} eq 'INFO') {
+        $RT::Logger->info ( RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_thirdparty.php#createThirdParty' says :" . $som->result->{'result_label'} );
+        $json_text = '{"status":"'.$som->result->{'result_code'}.'","label":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_thirdparty.php#createThirdParty :' . $som->result->{'result_code'}.' '.$som->result->{'result_label'} .'"}'   
+      }else {
+        $RT::Logger->error ( "Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_thirdparty.php#createThirdParty' :" . $som->result->{'result_code'}.' '.$som->result->{'result_label'} ); 
+        $json_text = '{"status":"'.$som->result->{'result_code'}.'","label":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_thirdparty.php#createThirdParty :' . $som->result->{'result_code'}.' '.$som->result->{'result_label'} .'"}'    
+      }
+    }
+  
+  }
+  #---- Creation de la societe a partir du nom prénom si la societe n'existe pas
+  elsif (defined $name && defined $firstname && $name ne '' && $firstname ne '' && $thirdparty_name eq ''){
+  
+    $thirdparty_name = $name." ".$firstname;
+  
+    $soap = SOAP::Lite->proxy(RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_thirdparty.php', timeout => 10);
+    $soap->serializer->namespaces->{"ns"} = "xmlns:ns";
+    $soap->autotype( 0 );
+    $soap->soapversion( '1.1' );
+    $soap->ns( 'http://www.dolibarr.org/ns/', 'ns' );
+    $soap->envprefix( 'soapenv' );
+  
+    $thirdparty = SOAP::Data->type("ns:thirdparty")->name('thirdparty' => \SOAP::Data->value(
+                                                                    SOAP::Data->type("xsd:string")->name('ref')->value($thirdparty_name),
+                                                                    SOAP::Data->type("xsd:string")->name('name')->value($thirdparty_name),
+                                                                    SOAP::Data->type("xsd:string")->name('status')->value(1),
+                                                                    SOAP::Data->type("xsd:string")->name('client')->value(1),
+                                                                    SOAP::Data->type("xsd:string")->name('supplier')->value(0),
+                                                                    SOAP::Data->type("xsd:string")->name('phone')->value($phone_pro),
+                                                                    SOAP::Data->type("xsd:string")->name('email')->value($email),
+                                                                    SOAP::Data->type("xsd:string")->name('vat_used')->value(0)
+                                                                    )
+                                                    );                                                      
+  
+    $som = $soap->call('createThirdParty',
+                      $header,
+                      $auth,
+                      $thirdparty
+    );
+    
+    #---- Erreur dans le retour du WS
+    if ( $som->fault ) {
+      $RT::Logger->error ( "Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_thirdparty.php#createThirdParty' :" . $som->fault->{faultstring} );
+      $json_text = '{"error":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_thirdparty.php#createThirdParty :' . $som->fault->{faultstring} .'"}'; 
+    } else {
+      $RT::Logger->debug ( "Webservice result '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_thirdparty.php#createThirdParty' :" . Dumper($som->result) );
+      if ($som->result->{'result_code'} eq 'OK' || $som->result->{'result_code'} eq 'NOT_CREATE (-2)'){  
+        $RT::Logger->debug ( "Webservice result '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_thirdparty.php#createThirdParty' : creation de la societe OK" );  
+        $json_text = '{"status":"'.$som->result->{'result_code'}.'","label":"'.$som->result->{'result_label'}.'"}';                    
+      } elsif ($som->result->{'result_code'} eq 'INFO') {
+        $RT::Logger->info ( RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_thirdparty.php#createThirdParty' says :" . $som->result->{'result_label'} );
+        $json_text = '{"status":"'.$som->result->{'result_code'}.'","label":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_thirdparty.php#createThirdParty :' . $som->result->{'result_code'}.' '.$som->result->{'result_label'} .'"}'   
+      }else {
+        $RT::Logger->error ( "Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_thirdparty.php#createThirdParty' :" . $som->result->{'result_code'}.' '.$som->result->{'result_label'} ); 
+        $json_text = '{"status":"'.$som->result->{'result_code'}.'","label":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_thirdparty.php#createThirdParty :' . $som->result->{'result_code'}.' '.$som->result->{'result_label'} .'"}'    
+      }
+    }    
+    
+    #---- Mise a jour de la societe pour lui affecter le type
+    $thirdparty = SOAP::Data->type("ns:thirdparty")->name('thirdparty' => \SOAP::Data->value(
+                                                                    SOAP::Data->type("xsd:string")->name('ref')->value($name." ".$firstname),
+                                                                    SOAP::Data->type("xsd:int")->name('typent')->value(8)
+                                                                    )
+                                                    );                                                      
+  
+    $som = $soap->call('updateThirdParty',
+                      $header,
+                      $auth,
+                      $thirdparty
+    );
+    
+    #---- Erreur dans le retour du WS
+    if ( $som->fault ) {
+      $RT::Logger->error ( "Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_thirdparty.php#updateThirdParty' :" . $som->fault->{faultstring} );
+      $json_text = '{"error":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_thirdparty.php#updateThirdParty :' . $som->fault->{faultstring} .'"}'; 
+    } else {
+      $RT::Logger->debug ( "Webservice result '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_thirdparty.php#updateThirdParty' :" . Dumper($som->result) );
+      if ($som->result->{'result_code'} eq 'OK'){  
+        $RT::Logger->debug ( "Webservice result '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_thirdparty.php#updateThirdParty' : creation de la societe OK" );  
+        $json_text = '{"status":"'.$som->result->{'result_code'}.'","label":"'.$som->result->{'result_label'}.'"}';
+      } elsif ($som->result->{'result_code'} eq 'INFO') {
+        $RT::Logger->info ( RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_thirdparty.php#updateThirdParty' says :" . $som->result->{'result_label'} );
+        $json_text = '{"status":"'.$som->result->{'result_code'}.'","label":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_thirdparty.php#updateThirdParty :' . $som->result->{'result_code'}.' '.$som->result->{'result_label'} .'"}'   
+      }else {
+        $RT::Logger->error ( "Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_thirdparty.php#updateThirdParty' :" . $som->result->{'result_code'}.' '.$som->result->{'result_label'} ); 
+        $json_text = '{"status":"'.$som->result->{'result_code'}.'","label":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_thirdparty.php#updateThirdParty :' . $som->result->{'result_code'}.' '.$som->result->{'result_label'} .'"}'    
+      }
+    }
+    
+  } 
+  
+  if (defined $thirdparty_name && defined $name && defined $firstname && $name ne '' && $firstname ne '' && $thirdparty_name ne ''){
+    #---- Création du contact
+    $soap = SOAP::Lite->proxy(RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_user.php', timeout => 10);
+    $soap->serializer->namespaces->{"ns"} = "xmlns:ns";
+    $soap->autotype( 0 );
+    $soap->soapversion( '1.1' );
+    $soap->ns( 'http://www.dolibarr.org/ns/', 'ns' );
+    $soap->envprefix( 'soapenv' );
+                                                        
+    $thirdparty = SOAP::Data->type("ns:thirdpartywithuser")->name('thirdpartywithuser' => \SOAP::Data->value(
+                                                                      SOAP::Data->type("xsd:string")->name('name')->value($name),
+                                                                      SOAP::Data->type("xsd:string")->name('firstname')->value($firstname),
+                                                                      SOAP::Data->type("xsd:string")->name('name_thirdparty')->value($thirdparty_name),
+                                                                      SOAP::Data->type("xsd:string")->name('client')->value(1),
+                                                                      SOAP::Data->type("xsd:string")->name('fournisseur')->value(0),
+                                                                      SOAP::Data->type("xsd:string")->name('phone_mobile')->value($phone_mobile),
+                                                                      SOAP::Data->type("xsd:string")->name('phone')->value($phone_perso),
+                                                                      SOAP::Data->type("xsd:string")->name('email')->value($email),
+                                                                      SOAP::Data->type("xsd:string")->name('login')->value($email)
+                                                                      )
+                                                      );                                                      
+    
+    $som = $soap->call('createUserFromThirdparty',
+                      $header,
+                      $auth,
+                      $thirdparty
+    );
+    
+    #---- Erreur dans le retour du WS
+    if ( $som->fault ) {
+      $RT::Logger->error ( "Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_user.php#createUserFromThirdparty' :" . $som->fault->{faultstring} );
+      $json_text = '{"error":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_user.php#createUserFromThirdparty :' . $som->fault->{faultstring} .'"}'; 
+    } else {
+      $RT::Logger->debug ( "Webservice result '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_user.php#createUserFromThirdparty' :" . Dumper($som->result) );
+      if ($som->result->{'result_code'} eq 'OK'){  
+        $json_text = '{"status":"'.$som->result->{'result_code'}.'","label":"'.$som->result->{'result_label'}.'"}';
+      } elsif ($som->result->{'result_code'} eq 'INFO') {
+        $RT::Logger->info ( RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_user.php#createUserFromThirdparty' says :" . $som->result->{'result_label'} );
+        $json_text = '{"status":"'.$som->result->{'result_code'}.'","label":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_user.php#createUserFromThirdparty :' . $som->result->{'result_code'}.' '.$som->result->{'result_label'} .'"}'   
+      }else {
+        $RT::Logger->error ( "Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_user.php#createUserFromThirdparty' :" . $som->result->{'result_code'}.' '.$som->result->{'result_label'} ); 
+        $json_text = '{"status":"'.$som->result->{'result_code'}.'","label":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_user.php#createUserFromThirdparty :' . $som->result->{'result_code'}.' '.$som->result->{'result_label'} .'"}'    
+      }
+    }
+  }
+}
+
+</%INIT>

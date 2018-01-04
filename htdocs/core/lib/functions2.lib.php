@@ -2161,18 +2161,18 @@ function cartesianArray(array $input) {
 function getModuleDirForApiClass($module)
 {
     $moduledirforclass=$module;
+    if ($moduledirforclass != 'api') $moduledirforclass = preg_replace('/api$/i','',$moduledirforclass);
 
-    if (in_array($module, array('login', 'access', 'status', 'documents'))) {
+    if ($module == 'contracts') {
+    	$moduledirforclass = 'contrat';
+    }
+    elseif (in_array($module, array('admin', 'login', 'setup', 'access', 'status', 'tools', 'documents'))) {
         $moduledirforclass = 'api';
     }
-    if (preg_match('/^dictionary/', $module)) {
-        $moduledirforclass = 'api';
-    }
-
-    if ($module == 'contact' || $module == 'contacts' || $module == 'customer' || $module == 'thirdparty' || $module == 'thirdparties') {
+    elseif ($module == 'contact' || $module == 'contacts' || $module == 'customer' || $module == 'thirdparty' || $module == 'thirdparties') {
         $moduledirforclass = 'societe';
     }
-    if ($module == 'propale' || $module == 'proposals') {
+    elseif ($module == 'propale' || $module == 'proposals') {
         $moduledirforclass = 'comm/propal';
     }
     elseif ($module == 'agenda' || $module == 'agendaevents') {
@@ -2190,6 +2190,9 @@ function getModuleDirForApiClass($module)
     elseif ($module == 'order' || $module == 'orders') {
         $moduledirforclass = 'commande';
     }
+    elseif ($module == 'shipments') {
+    	$moduledirforclass = 'expedition';
+    }
     elseif ($module == 'facture' || $module == 'invoice' || $module == 'invoices') {
         $moduledirforclass = 'compta/facture';
     }
@@ -2205,6 +2208,9 @@ function getModuleDirForApiClass($module)
     elseif ($module == 'stock' || $module == 'stockmovements' || $module == 'warehouses') {
         $moduledirforclass = 'product/stock';
     }
+    elseif ($module == 'supplierproposals' || $module == 'supplierproposal' || $module == 'supplier_proposal') {
+    	$moduledirforclass = 'supplier_proposal';
+    }
     elseif ($module == 'fournisseur' || $module == 'supplierinvoices' || $module == 'supplierorders') {
         $moduledirforclass = 'fourn';
     }
@@ -2216,5 +2222,27 @@ function getModuleDirForApiClass($module)
     }
 
     return $moduledirforclass;
+}
+
+/*
+ * Return 2 hexa code randomly
+ *
+ * @param	$min	int	Between 0 and 255
+ * @param	$max	int	Between 0 and 255
+ * @return String
+ */
+function random_color_part($min=0,$max=255) {
+	return str_pad( dechex( mt_rand( $min, $max) ), 2, '0', STR_PAD_LEFT);
+}
+
+/*
+ * Return hexadecimal color randomly
+ *
+ * @param	$min	int	Between 0 and 255
+ * @param	$max	int	Between 0 and 255
+ * @return String
+ */
+function random_color($min=0, $max=255) {
+	return random_color_part($min, $max) . random_color_part($min, $max) . random_color_part($min, $max);
 }
 

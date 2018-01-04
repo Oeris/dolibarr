@@ -1,0 +1,144 @@
+
+% print $html_text; 
+
+<%ARGS>
+$ref_facture => undef
+$html_text => undef
+$ticket_id => undef
+</%ARGS>
+
+<%INIT>
+
+# ----------------- Fake proxy for CrosDomain problem
+#use HTTP::Request;
+#use LWP::UserAgent;
+#use Data::Dumper;
+
+use SOAP::Lite +trace => [ transport => \&log_message ];
+use MIME::Entity;
+use HTTP::Cookies;
+use HTTP::Message;
+use HTTP::Response;
+use HTTP::Request;
+use Data::Dumper;
+
+
+sub log_message {
+
+    return 1 if ( RT->Config->Get( 'LogToFile' ) ne 'debug' );
+
+    my ($in) = @_;
+    if ( $in->isa("HTTP::Response") ) {
+        open(FILE,">/tmp/RT-Response-oeris_invoice_detail.log");
+        print FILE $in->content;
+        close (FILE);
+    }elsif ( $in->isa("HTTP::Request") ) {
+        open(FILE,">/tmp/RT-Request-oeris_invoice_detail.log");
+        print FILE $in->content;
+        close (FILE);
+    }
+}
+
+
+$ENV{'PERL_LWP_SSL_VERIFY_HOSTNAME'} = 0;
+
+
+
+if (!defined $ref_facture) {
+  $RT::Logger->error ( "Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#getInvoice' : arguments 'ref_facture' is mandatory" ); 
+} else {
+  
+  
+  my $soap = SOAP::Lite->proxy(RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_invoice.php', timeout => 10);
+  $soap->serializer->namespaces->{"ns"} = "xmlns:ns";
+  $soap->autotype( 0 );
+  $soap->soapversion( '1.1' );
+  $soap->ns( 'http://www.dolibarr.org/ns/', 'ns' );
+  $soap->envprefix( 'soapenv' );
+  
+  my $header = SOAP::Header->type( 'xml' => '' );
+  
+  
+  my $auth = SOAP::Data->type("ns:authentication")->name('authentication' => \SOAP::Data->value(
+                                                                   SOAP::Data->name('dolibarrkey')->value(RT->Config->Get( 'DolibarrKey' )),
+                                                                   SOAP::Data->name('sourceapplication')->value('Request Tracker'),
+                                                                   SOAP::Data->name('login')->value(RT->Config->Get( 'DolibarrLogin' )),
+                                                                   SOAP::Data->name('password')->value(RT->Config->Get( 'DolibarrPassword' )),
+                                                                   SOAP::Data->name('entity')->value('')
+                                                                  )
+                                                      );
+  
+  my $som = $soap->call('getInvoice',
+                    $header,
+                    $auth,
+                    SOAP::Data->name('id')->value(''),
+                    SOAP::Data->name('ref')->value($ref_facture),
+                    SOAP::Data->name('ref_ext')->value('')
+  );
+  
+  #---- Erreur dans le retour du WS
+  if ( $som->fault ) {
+    $RT::Logger->error ( "Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#getInvoice' :" . $som->fault->{faultstring} );
+  } else {
+    $RT::Logger->debug ( "Webservice result '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#getInvoice' :" . Dumper($som->result) );
+    if ($som->result->{'result_code'} eq 'OK'){
+      $RT::Logger->debug ( "Webservice result '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#getInvoice' :" . Dumper($som->paramsout) );
+      my $total = 0;
+      my $id = 0;
+      
+      #$html_text .= '<strong style="font-size:small;">Liste des produits factur&eacute;s</strong><br><br>';
+      $html_text .= '<br><table>';          
+      foreach my $item (@{$som->paramsout->{"lines"}}){    
+        $id = $item->{"id"};
+        $total += $item->{"total"};
+        if (!defined($item->{"product_ref"})) {
+          $html_text .= '<tr class="date "><td class="label">&nbsp;</td><td align="right" class="">'.$item->{"desc"}.'&nbsp; x &nbsp;'.$item->{"qty"}.'&nbsp; = &nbsp;'.sprintf("%02d", $item->{"total"}).'&euro; ttc</td><td class="">&nbsp;';
+        } else {
+          $html_text .= '<tr class="date "><td class="label">&nbsp;</td><td align="right" class="">'.$item->{"product_ref"}.'&nbsp; x &nbsp;'.$item->{"qty"}.'&nbsp; = &nbsp;'.sprintf("%02d", $item->{"total"}).'&euro; ttc</td><td class="">&nbsp;';          
+        }
+        
+        if($som->paramsout->{"status"} < 2) {
+          $html_text .= '<input type="submit" class="buttons delete" style="background-color: #f44336;" value="-" name="deleteitem_'.$item->{"id"}.'" id="deleteitem_'.$item->{"id"}.'"></td></tr>';          
+        }   
+        if (defined($item->{"product_ref"})) {                                                                                                                                 
+          $html_text .= '<tr class="date "><td class="label">&nbsp;</td><td align="right" class="">'.$item->{"desc"}.'&nbsp;</td><td class="">&nbsp;</td></tr>'; 
+        }
+      }
+      if($som->paramsout->{"status"} < 2) {
+        $html_text .= '<tr class="date "><td class="label">&nbsp;</td><td align="right" class=""><input type="hidden" name="productid" id="productid" value=""><input type="text" name="refproduit" id="refproduit" size="30" class="refproduit" value="">&nbsp; x &nbsp;<input type="number" min="1" max="100" step="1" name="qty" id="qty" class="qty" value="1" required="true"></td><td class="">&nbsp;<input type="submit" class="buttons add" value="+" name="invoiceaddproduct" id="invoiceaddproduct"></td></tr>';
+      }
+      $html_text .= '<tr class="date "><td colspan="3"><hr></td></tr>';
+      $html_text .= '<tr class="date "><td class="label">&nbsp;</td><td align="right" class="">Total &nbsp; = &nbsp;</td><td class="">'.$total.'&euro; ttc</td></tr>';
+      $html_text .= '<tr class="date "><td colspan="3">&nbsp;</td></tr>';
+      $html_text .= '</table>';
+      
+      my $invoice_status = undef;                                                               
+      #---- Bouton de validation de la facture
+      if($som->paramsout->{"status"} == 0) {
+        $invoice_status = 'brouillon';
+        $html_text .= '<div id="no-invoice" style="font-size:small;"><input type="hidden" name="invoicestatus" id="invoicestatus" value="1">Moyen de paiement associ&eacute; <span id="paiementtype"></span>. Modifier en statut <a href="#" id="changeinvoicestatus"><strong>valid&eacute;e</strong></a></div><br><br>';  
+      } elsif($som->paramsout->{"status"} == 1) {
+        $invoice_status = 'valid&eacute;e';
+        $html_text .= '<div style="font-size:small;"><input type="hidden" name="invoicestatus" id="invoicestatus" value="0"><span id="paiementtype" style="display:none"></span>Modifier en statut <a href="#" id="changeinvoicestatus"><strong>brouillon</strong></a></div><br><br>';
+      } elsif($som->paramsout->{"status"} == 2) {
+        $invoice_status = 'pay&eacute;e';
+      }
+      $html_text .= '<div id="invoicelink" style="display:none"><strong>D&eacute;tails de la facture num&eacute;ro <a href="'.RT->Config->Get( 'DolibarrURL' ).'/compta/facture.php?facid='.$som->paramsout->{"id"}.'" target="_blank">'.$som->paramsout->{"ref"}.'</strong>&nbsp;('.$invoice_status.')&nbsp;</a>&nbsp;<a id="download-invoice" target="_blank" href="'.RT->Config->Get('DolibarrURL').'/dolinrt/oeris_get_document.php?modulepart=facture&file='.$ref_facture.'/'.$ref_facture.'.pdf&dolibarrkey='.RT->Config->Get('DolibarrKey').'&login='.RT->Config->Get('DolibarrLogin').'"><img src="/static/images/dl-pdf.png" height="25px" width="25px" style="vertical-align:middle;" alt="Download PDF"></a></div>'; 
+
+      my $total_ttc = RT->Config->Get( 'CFTotalTTC' );
+      #---- Ajoute le total ttc au CP 
+      my $TicketObj = RT::Ticket->new($RT::SystemUser);
+      $TicketObj->Load($ticket_id);
+      $TicketObj->AddCustomFieldValue( Field => $total_ttc , Value => sprintf("%.2f", $som->paramsout->{"total"}) ); 
+
+      
+    } elsif ($som->result->{'result_code'} eq 'INFO') {
+      $RT::Logger->info ( RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#getInvoice' says :" . $som->result->{'result_label'} );   
+    }else {
+      $RT::Logger->error ( "Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#getInvoice' :" . $som->result->{'result_label'} );
+      $html_text .= '<div id="no-invoice" style="font-size:small;font-color:red"><strong>Aucune facture ne correspond &agrave; la r&eacute;f&eacute;rence '.$ref_facture.'</strong></div><br><br>';   
+    }
+  }
+}                     
+
+</%INIT>

@@ -1,0 +1,285 @@
+
+% print $json_text; 
+
+<%ARGS>
+$productid => ''
+$productref => ''
+$qty => undef
+$ref_facture => undef
+$status => undef
+$delete_item_id => undef
+$json_text => undef
+$ticket_id => undef
+$ticket_subject => undef
+$mode_reglement_id => undef
+$cond_reglement_id => undef
+</%ARGS>
+
+<%INIT>
+
+# ----------------- Fake proxy for CrosDomain problem
+#use HTTP::Request;
+#use LWP::UserAgent;
+#use Data::Dumper;
+
+use SOAP::Lite +trace => [ transport => \&log_message ];
+use MIME::Entity;
+use HTTP::Cookies;
+use HTTP::Message;
+use HTTP::Response;
+use HTTP::Request;
+use Data::Dumper;
+
+
+sub log_message {
+
+    return 1 if ( RT->Config->Get( 'LogToFile' ) ne 'debug' );
+
+    my ($in) = @_;
+    if ( $in->isa("HTTP::Response") ) {
+        open(FILE,">/tmp/RT-Response-oeris_update_invoice.log");
+        print FILE $in->content;
+        close (FILE);
+    }elsif ( $in->isa("HTTP::Request") ) {
+        open(FILE,">/tmp/RT-Request-oeris_update_invoice.log");
+        print FILE $in->content;
+        close (FILE);
+    }
+}
+
+
+$ENV{'PERL_LWP_SSL_VERIFY_HOSTNAME'} = 0;
+
+
+#---- suppression d'un item de la facture
+if(defined($delete_item_id)) {
+
+      if ( !defined $delete_item_id || !defined $ref_facture  ) {
+        $RT::Logger->error ( "[UpdateInvoice] Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#updateInvoice' : arguments 'delete_item_id' and 'ref_facture' are mandatory" ); 
+      } else {
+      
+        my $soap = SOAP::Lite->proxy(RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_invoice.php', timeout => 10);
+        $soap->serializer->namespaces->{"ns"} = "xmlns:ns";
+        $soap->autotype( 0 );
+        $soap->soapversion( '1.1' );
+        $soap->ns( 'http://www.dolibarr.org/ns/', 'ns' );
+        $soap->envprefix( 'soapenv' );
+        
+        my $header = SOAP::Header->type( 'xml' => '' );
+        
+        
+        my $auth = SOAP::Data->type("ns:authentication")->name('authentication' => \SOAP::Data->value(
+                                                                           SOAP::Data->name('dolibarrkey')->value(RT->Config->Get( 'DolibarrKey' )),
+                                                                           SOAP::Data->name('sourceapplication')->value('Request Tracker'),
+                                                                           SOAP::Data->name('login')->value(RT->Config->Get( 'DolibarrLogin' )),
+                                                                           SOAP::Data->name('password')->value(RT->Config->Get( 'DolibarrPassword' )),
+                                                                           SOAP::Data->name('entity')->value('')
+                                                                          )
+                                                            );
+                                                            
+        my $invoice = SOAP::Data->type("ns:invoice")->name('invoice' => \SOAP::Data->value(
+                                                                          SOAP::Data->type("xsd:string")->name('ref')->value($ref_facture),
+                                                                          SOAP::Data->type("xsd:int")->name('delete_item_id')->value($delete_item_id)
+                                                                          
+                                                           )   
+                                                  );                                                      
+        
+        my $som = $soap->call('updateInvoice',
+                          $header,
+                          $auth,
+                          $invoice
+        );
+        
+        #---- Erreur dans le retour du WS
+        if ( $som->fault ) {
+          $RT::Logger->error ( "[UpdateInvoice] Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#updateInvoice' :" . $som->fault->{faultstring} );
+          $json_text = '{"error":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_invoice.php#updateInvoice :' . $som->fault->{faultstring} .'"}'; 
+        } else {
+          $RT::Logger->debug ( "[UpdateInvoice] Webservice result '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#updateInvoice' :" . Dumper($som->result) );
+          if ($som->result->{'result_code'} eq 'OK'){                                                                                        
+            $json_text = '{"result_code":"'.$som->result->{'result_code'}.'"}';
+            
+            #$html_text .= '<br><a href="'.RT->Config->Get( 'DolibarrURL' ).'/commande/card.php?id='.$cmdid.'">Consulter la fiche commande '.$term.'</a>';
+          } elsif ($som->result->{'result_code'} eq 'INFO') {
+            $RT::Logger->info ( "[UpdateInvoice] ".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#updateInvoice' says :" . $som->result->{'result_label'} );
+            $json_text = '{"error":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_invoice.php#updateInvoice :' . $som->result->{'result_label'} .'"}'   
+          }else {
+            $RT::Logger->error ( "[UpdateInvoice] Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#updateInvoice' :" . $som->result->{'result_label'} ); 
+            $json_text = '{"error":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_invoice.php#updateInvoice :' . $som->result->{'result_label'} .'"}'    
+          }
+        }
+      }
+
+
+
+
+#---- validation de la facture
+} elsif(defined($status)) {
+
+      if ( !defined $status || !defined $ref_facture  ) {
+        $RT::Logger->error ( "[UpdateInvoice] Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#updateInvoice' : arguments 'status' and 'ref_facture' are mandatory" ); 
+      } else {
+        
+        
+        my $soap = SOAP::Lite->proxy(RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_invoice.php', timeout => 5);
+        $soap->serializer->namespaces->{"ns"} = "xmlns:ns";
+        $soap->autotype( 0 );
+        $soap->soapversion( '1.1' );
+        $soap->ns( 'http://www.dolibarr.org/ns/', 'ns' );
+        $soap->envprefix( 'soapenv' );
+        
+        my $header = SOAP::Header->type( 'xml' => '' );
+        
+        
+        my $auth = SOAP::Data->type("ns:authentication")->name('authentication' => \SOAP::Data->value(
+                                                                           SOAP::Data->name('dolibarrkey')->value(RT->Config->Get( 'DolibarrKey' )),
+                                                                           SOAP::Data->name('sourceapplication')->value('Request Tracker'),
+                                                                           SOAP::Data->name('login')->value(RT->Config->Get( 'DolibarrLogin' )),
+                                                                           SOAP::Data->name('password')->value(RT->Config->Get( 'DolibarrPassword' )),
+                                                                           SOAP::Data->name('entity')->value('')
+                                                                          )
+                                                            );
+        
+        
+        my $payment_mode_id = '';
+        if (defined($mode_reglement_id) && $mode_reglement_id>0)
+        {
+          $payment_mode_id = SOAP::Data->type("xsd:string")->name('payment_mode_id')->value($mode_reglement_id);  
+        }
+        
+        my $payment_code_id = '';
+        if (defined($cond_reglement_id) && $cond_reglement_id>0)
+        {
+          $payment_code_id = SOAP::Data->type("xsd:string")->name('cond_reglement_id')->value($cond_reglement_id);
+        }
+                                                            
+        my $invoice = SOAP::Data->type("ns:invoice")->name('invoice' => \SOAP::Data->value(
+                                                                          SOAP::Data->type("xsd:string")->name('ref')->value($ref_facture),
+                                                                          SOAP::Data->type("xsd:int")->name('status')->value($status),
+                                                                          $payment_mode_id,
+                                                                          $payment_code_id
+                                                                          
+                                                           )   
+                                                  );                                                      
+        
+        my $som = $soap->call('updateInvoice',
+                          $header,
+                          $auth,
+                          $invoice
+        );
+        
+        #---- Erreur dans le retour du WS
+        if ( $som->fault ) {
+          $RT::Logger->error ( "[UpdateInvoice] Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#updateInvoice' :" . $som->fault->{faultstring} );
+          $json_text = '{"error":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_invoice.php#updateInvoice :' . $som->fault->{faultstring} .'"}'; 
+        } else {
+          $RT::Logger->debug ( "[UpdateInvoice] Webservice result '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#updateInvoice' :" . Dumper($som->result) );
+          if ($som->result->{'result_code'} eq 'OK'){
+            $RT::Logger->debug ( "[UpdateInvoice] Webservice result '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#updateInvoice' :" . Dumper($som->paramsout) );
+      
+            $RT::Logger->debug ( "[UpdateInvoice] Webservice result '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_searchcontact.php#updateInvoice' :" . Dumper($som->paramsout) );
+            my $ref_facture=undef;                                                                                                           
+            $json_text = '{"id":"'.$som->paramsout->{"id"}.'","ref":"'.$som->paramsout->{"ref"}.'"}';
+            $ref_facture = $som->paramsout->{"ref"};
+            
+            
+            my $total_ttc = RT->Config->Get( 'CFTotalTTC' );
+            #---- Ajoute le total ttc au CP 
+            my $TicketObj = RT::Ticket->new($RT::SystemUser);
+            $TicketObj->Load($ticket_id);
+            $TicketObj->AddCustomFieldValue( Field => $total_ttc , Value => sprintf("%02d", $som->paramsout->{"total_ttc"}) ); 
+            
+            
+            #$html_text .= '<br><a href="'.RT->Config->Get( 'DolibarrURL' ).'/commande/card.php?id='.$cmdid.'">Consulter la fiche commande '.$term.'</a>';
+          } elsif ($som->result->{'result_code'} eq 'INFO') {
+            $RT::Logger->info ( "[UpdateInvoice] ".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#updateInvoice' says :" . $som->result->{'result_label'} );
+            $json_text = '{"error":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_invoice.php#updateInvoice :' . $som->result->{'result_label'} .'"}'   
+          }else {
+            $RT::Logger->error ( "[UpdateInvoice] Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#updateInvoice' :" . $som->result->{'result_label'} ); 
+            $json_text = '{"error":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_invoice.php#updateInvoice :' . $som->result->{'result_label'} .'"}'    
+          }
+        }
+      }
+
+
+} 
+#---- ajout de produit a la facture existante
+else {
+
+      if ( !defined $productid ||  !defined $qty  || !defined $ref_facture  ) {
+        $RT::Logger->error ( "[UpdateInvoice] Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#updateInvoice' : arguments 'productid', 'qty' and 'ref_facture' are mandatory" ); 
+      } else {
+        
+        
+        my $soap = SOAP::Lite->proxy(RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_invoice.php', timeout => 10);
+        $soap->serializer->namespaces->{"ns"} = "xmlns:ns";
+        $soap->autotype( 0 );
+        $soap->soapversion( '1.1' );
+        $soap->ns( 'http://www.dolibarr.org/ns/', 'ns' );
+        $soap->envprefix( 'soapenv' );
+        
+        my $header = SOAP::Header->type( 'xml' => '' );
+        
+        
+        my $auth = SOAP::Data->type("ns:authentication")->name('authentication' => \SOAP::Data->value(
+                                                                           SOAP::Data->name('dolibarrkey')->value(RT->Config->Get( 'DolibarrKey' )),
+                                                                           SOAP::Data->name('sourceapplication')->value('Request Tracker'),
+                                                                           SOAP::Data->name('login')->value(RT->Config->Get( 'DolibarrLogin' )),
+                                                                           SOAP::Data->name('password')->value(RT->Config->Get( 'DolibarrPassword' )),
+                                                                           SOAP::Data->name('entity')->value('')
+                                                                          )
+                                                            );
+                                                            
+        my $invoice = SOAP::Data->type("ns:invoice")->name('invoice' => \SOAP::Data->value(
+                                                                          SOAP::Data->type("xsd:string")->name('ref')->value($ref_facture),
+                                                                          SOAP::Data->type("ns:LinesArray2")->name('lines' => \SOAP::Data->value(
+                                                                                    SOAP::Data->type("ns:line")->name('line' => \SOAP::Data->value(
+                                                                                              SOAP::Data->type("xsd:double")->name('qty')->value($qty),
+                                                                                              SOAP::Data->type("xsd:int")->name('product_id')->value($productid),
+                                                                                              SOAP::Data->type("xsd:int")->name('product_ref')->value($productref)
+                                                                                                      )
+                                                                                              )
+                                                                                    )
+                                                                          )
+                                                           )   
+                                                  );                                                      
+        
+        #print $soap;
+        #return;
+        
+        my $som = $soap->call('updateInvoice',
+                          $header,
+                          $auth,
+                          $invoice
+        );
+        
+        #---- Erreur dans le retour du WS
+        if ( $som->fault ) {
+          $RT::Logger->error ( "[UpdateInvoice] Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#updateInvoice' :" . $som->fault->{faultstring} );
+          $json_text = '{"error":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_invoice.php#updateInvoice :' . $som->fault->{faultstring} .'"}'; 
+        } else {
+          $RT::Logger->debug ( "[UpdateInvoice] Webservice result '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#updateInvoice' :" . Dumper($som->result) );
+          if ($som->result->{'result_code'} eq 'OK'){
+            $RT::Logger->debug ( "[UpdateInvoice] Webservice result '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#updateInvoice' :" . Dumper($som->paramsout) );
+      
+            $RT::Logger->debug ( "[UpdateInvoice] Webservice result '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_searchcontact.php#updateInvoice' :" . Dumper($som->paramsout) );
+            my $ref_facture=undef;                                                                                                           
+            $json_text = '{"id":"'.$som->paramsout->{"id"}.'","ref":"'.$som->paramsout->{"ref"}.'"}';
+            $ref_facture = $som->paramsout->{"ref"};
+             
+            
+            #$html_text .= '<br><a href="'.RT->Config->Get( 'DolibarrURL' ).'/commande/card.php?id='.$cmdid.'">Consulter la fiche commande '.$term.'</a>';
+          } elsif ($som->result->{'result_code'} eq 'INFO') {
+            $RT::Logger->info ( "[UpdateInvoice] ".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#updateInvoice' says :" . $som->result->{'result_label'} );
+            $json_text = '{"error":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_invoice.php#updateInvoice :' . $som->result->{'result_label'} .'"}'   
+          }else {
+            $RT::Logger->error ( "[UpdateInvoice] Error when calling webservice '".RT->Config->Get( 'DolibarrURL' )."/dolinrt/oeris_invoice.php#updateInvoice' :" . $som->result->{'result_label'} ); 
+            $json_text = '{"error":"Error when calling webservice '.RT->Config->Get( 'DolibarrURL' ).'/dolinrt/oeris_invoice.php#updateInvoice :' . $som->result->{'result_label'} .'"}'    
+          }
+        }
+      }
+
+}
+
+
+</%INIT>

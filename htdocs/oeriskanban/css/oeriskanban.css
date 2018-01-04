@@ -1,0 +1,12 @@
+/* CSS Document */
+
+div.mainmenu.oeriskanban {
+  background-image: url(/oeriskanban/img/kb.svg);
+  opacity: 0.2;
+  filter: alpha(opacity=20); /* For IE8 and earlier */
+}
+div.mainmenu.oeriskanboard {
+  background-image: url(/oeriskanban/img/kb.svg);
+  opacity: 0.2;
+  filter: alpha(opacity=20); /* For IE8 and earlier */
+}

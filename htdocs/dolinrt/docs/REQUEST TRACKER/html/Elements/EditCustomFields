@@ -1,0 +1,354 @@
+%# BEGIN BPS TAGGED BLOCK {{{
+%#
+%# COPYRIGHT:
+%#
+%# END BPS TAGGED BLOCK }}}
+% $m->callback( CallbackName => 'BeforeCustomFields', Object => $Object,
+%               Grouping => $Grouping, ARGSRef => \%ARGS, CustomFields => $CustomFields);
+
+% if (@CustomFields) {
+
+
+% #---- Store fields so we can use them in ajax queries 
+% my $fields = { };
+% while ( my $CustomField = $CustomFields->Next ) {
+%    $fields->{$CustomField->Name} = GetCustomFieldInputName(Object => $Object, CustomField => $CustomField, Grouping => $Grouping );
+%    $fields->{$CustomField->Name} =~ s/:/\\\\:/g;
+%    $fields->{$CustomField->Name} =~ s/ //g;
+%    $RT::Logger->debug( "[EditCustomFields] DOM modified : ". $CustomField->Name . "(" . $CustomField->Type . ") => ". $fields->{$CustomField->Name} );
+% }
+
+
+% #---- Get Hash with CF and filters
+% my $CFandFilter = RT->Config->Get('CFandFilter');
+% #---- List all DOM with autocompletion
+% my $DOMList = {};
+% my $CFValue = {};
+
+% if ( $WRAP ) {
+<<% $WRAP %> class="edit-custom-fields">
+% }
+% for my $CustomField (@CustomFields) {
+% my $Type = $CustomField->Type || 'Unknown';
+
+  <<% $FIELD %> class="edit-custom-field cftype-<% $Type %>">
+    <<% $CELL %> class="cflabel">
+      <span class="name"><% $CustomField->Name %>:</span><br />
+      <span class="type"><% $CustomField->EntryHint // '' %></span>
+    </<% $CELL %>>
+    <<% $CELL %> class="entry">
+  
+% #--- Autocomplete fields defined in %CFandFilter (see RT_SiteConfig.pm) 
+% my @DolToRTQueues = RT->Config->Get('DolToRTQueues');
+% my $QueueObj = undef;
+% if (defined $Queue) {
+%    $QueueObj = RT::Queue->new($session{'CurrentUser'});
+%    $QueueObj->Load($Queue) or Abort(loc("Queue could not be loaded."));
+% } else {
+%    $QueueObj = $Object->QueueObj;
+% }
+% my $CurrentQueue = $QueueObj->Name;
+% if ( defined $CFandFilter->{$CustomField->Name} && scalar(grep(/$CurrentQueue/, @DolToRTQueues)) ) {
+%    my $DOM = GetCustomFieldInputName(Object => $Object, CustomField => $CustomField, Grouping => $Grouping );
+%    $DOM =~ s/:/\\\\:/g;
+%    $DOM =~ s/ //g;
+%    $RT::Logger->debug ( "[EditCustomFields] Found CF : ".$CustomField->Name." dom : ".$DOM." Count ". $Object->CustomFieldValues( $CustomField->id )->Count );
+%    $DOMList->{$CustomField->Name} = $DOM;
+%    if($ForCreation==0) {
+%       if ( $Object->CustomFieldValues( $CustomField->id )->Count > 0 ) {
+%         $CFValue->{$CFandFilter->{$CustomField->Name}} = $Object->CustomFieldValues( $CustomField->id )->First->Content;
+%      } else {
+%         $CFValue->{$CFandFilter->{$CustomField->Name}} = '';
+%      }
+%    }
+% } else {
+%    $RT::Logger->debug ( "[EditCustomFields] RT to Dolibarr not active for queue ".$CurrentQueue  ) if ( !scalar(grep(/$CurrentQueue/, @DolToRTQueues)) );
+% }  
+    
+% my $default = $m->notes('Field-' . $CustomField->Id);
+% $default ||= $ARGS{"CustomField-". $CustomField->Id };
+      <& /Elements/EditCustomField,
+          %ARGS,
+          CustomField => $CustomField,
+          Default => $default,
+          Object => $Object,
+      &>
+%  if (my $msg = $m->notes('InvalidField-' . $CustomField->Id)) {
+        <br />
+        <span class="cfinvalidfield"><% $msg %></span>
+%  } elsif ($ShowHints and $CustomField->FriendlyPattern) {
+        <br>
+        <span class="cfhints">
+          <&|/l, $CustomField->FriendlyPattern &>Input must match [_1]</&>
+        </span>
+%  }
+    </<% $CELL %>>
+% $m->callback( CallbackName => 'AfterCustomFieldValue', CustomField => $CustomField, Object => $Object, Grouping => $Grouping );
+  </<% $FIELD %>>  
+% }
+
+% if ( $WRAP ) {
+</<% $WRAP %>>
+% }
+
+
+% if(scalar(keys(%$DOMList))) {
+
+  <style>
+  .ui-autocomplete-loading { background: white url('/static/images/ajax_loading_16.gif') right center no-repeat; }
+% # if($ForCreation>0) {  
+  input.buttons
+  {
+    display: inline-block !important;
+    background: #eeeeee; /* Old browsers */
+    background: -moz-linear-gradient(top, #eeeeee 0%, #eeeeee 100%) !important; /* FF3.6+ */
+    background: -webkit-gradient(linear, left top, left bottom, color-stop(0%,#eeeeee), color-stop(100%,#eeeeee)) !important; /* Chrome,Safari4+ */
+    background: -webkit-linear-gradient(top, #eeeeee 0%,#eeeeee 100%) !important; /* Chrome10+,Safari5.1+ */
+    background: -o-linear-gradient(top, #eeeeee 0%,#eeeeee 100%) !important; /* Opera11.10+ */
+    background: -ms-linear-gradient(top, #eeeeee 0%,#eeeeee 100%) !important; /* IE10+ */
+    filter: progid:DXImageTransform.Microsoft.gradient( startColorstr='#eeeeee', endColorstr='#eeeeee',GradientType=0 ) !important; /* IE6-9 */
+    background: linear-gradient(top, #eeeeee 0%,#eeeeee 100%) !important; /* W3C */
+    border: 1px solid #a1a1a1 !important;
+    padding: 0 2em !important;
+    font: bold Arial, Helvetica !important;
+    text-decoration: none !important;
+    color: #333 !important;
+    border-radius: .2em !important;
+  }
+  input.buttons:before
+  {
+    float: left !important;
+    width: 1em !important;
+    text-align: center !important;
+    font-size: 1.7em !important;
+    margin: 0 0.5em 0 -1em !important;
+    padding: 0 .2em !important;
+    pointer-events: none !important;
+  }
+  
+% # }
+  </style>
+  
+% if($ForCreation>0) {  
+  <input type="button" class="buttons add"  value="Ajouter un contact" name="addcustomer" id="addcustomer">
+% }  
+
+  <script type="text/javascript"> 
+    var newuser = new Object();
+    jQuery(document).ready(function($) {
+    
+% #---- Recherche de l'exisatnce du contact dans Dolibarr
+          function checkUser(filter, term) {
+            if(typeof(term) != "undefined")
+            {
+              if (term.length > 0 )
+              {  
+                  $.ajax({
+                     url : "<% RT->Config->Get('WebURL') %>NoAuth/SearchContact?filter="+filter+"&isStrict=1",
+                     type : 'POST', 
+                     data : 'term='+term, 
+                     dataType : 'json',
+                     success : function(json, statut){
+                        $.each(json, function (index, item) {
+                            if( item.email == '<% $CFValue->{"email"} %>' ) 
+                            {
+                                $('#addcustomer').val($("<div>").html("Contact pr&eacute;sent dans Dolibarr").text());
+                                $('#addcustomer').attr('disabled','disabled');
+                                return 1;
+                            }
+                            if( item.email == newuser['email'] ) 
+                            {
+                                $('#addcustomer').val($("<div>").html("Contact pr&eacute;sent dans Dolibarr").text());
+                                $('#addcustomer').attr('disabled','disabled');
+                                return 1;
+                            }   
+                        });             
+                     },
+                     error : function(resultat, statut, erreur){
+                       
+                     },
+                     complete : function(resultat, statut){
+              
+                     }
+                  });
+              }
+            }
+            
+            return -1;
+          }    
+    
+    
+    
+%         my %reveseCFandFilter = reverse %$CFandFilter; 
+   
+   
+% #---- Recherche de l'exisatnce du contact dans Dolibarr
+         if(checkUser('email', $("#<% $fields->{$reveseCFandFilter{'email'}} %>").val() ) == -1)
+         {
+            $('#addcustomer').val('Ajouter un contact');
+            $('#addcustomer').removeAttr('disabled');
+         }  
+   
+% #---- Add a listener foreach Dom List    
+%         my @SingleAutocomplete = RT->Config->Get('SingleAutocomplete');        
+%         foreach my $CF (keys(%$DOMList)) { 
+
+ 
+              //---- Store fields values to allow user creation
+              $('#<% $fields->{$CF} %>').on('autocompletechange change', function () {
+% #  if($ForCreation==0) { 
+                    if(checkUser('email', $("#<% $fields->{$reveseCFandFilter{'email'}} %>").val() ) == -1)
+                    {
+                        if(this.value != '')
+                        {  
+                          $('#addcustomer').val('Ajouter un contact');
+                          $('#addcustomer').removeAttr('disabled');
+                        }  
+                    } 
+% #   }               
+                    newuser['<% $CFandFilter->{$CF} %>'] = this.value;
+%                   foreach my $CFName (keys(%$CFandFilter)) {
+%                     next if($CF eq $CFName);     
+                      newuser['<% $CFandFilter->{$CFName} %>'] = $("#<% $fields->{$CFName} %>").val();
+%                   }                      
+              }).change();
+
+
+              $("#<% $DOMList->{$CF} %>").autocomplete({
+                      source: "<% RT->Config->Get('WebURL') %>NoAuth/SearchContact?filter=<% $CFandFilter->{$CF} %>",
+                      minLength: 3,
+                      select: function( event, ui ) {
+                              if( ui.item ) {                                    
+%                                  if ( @SingleAutocomplete && scalar(grep(/$CF/, @SingleAutocomplete)) ){
+                                      $("#<% $fields->{$CF} %>").val(ui.item.<% $CFandFilter->{$CF} %>);
+%                                  } else {                                   
+%                                     foreach my $CFName (keys(%$CFandFilter)) {
+%  if($ForCreation==1) { 
+%                                         if($CFandFilter->{$CFName} eq 'email') {
+                                            var string = $('#Requestors').val(), expr=ui.item.email;
+                                            if(string.search(expr) == -1){
+                                              var demandeurs = $('#Requestors').val() + ', ' + ui.item.email; 
+                                              $('#Requestors').val(demandeurs);
+                                            }
+%                                         }
+% }
+                                          $("#<% $fields->{$CFName} %>").val(ui.item.<% $CFandFilter->{$CFName} %>);
+                                          newuser['<% $CFandFilter->{$CF} %>'] = ui.item.<% $CFandFilter->{$CFName} %>;
+                                          $('#addcustomer').val($("<div>").html("Contact pr&eacute;sent dans Dolibarr").text());
+                                          $('#addcustomer').attr('disabled','disabled');
+%                                     }
+%                                  }
+                              }
+                              return false;
+                            }
+              }).data( "ui-autocomplete" )._renderItem = function( ul, item ) {
+                      if(item.id>-1)
+                      {
+%                           if ( @SingleAutocomplete && scalar(grep(/$CF/, @SingleAutocomplete)) ){              
+                                  return $( '<li>' )
+                                          .append( '<a style="font-size:12px;">' + item.societe + '</a>' )
+                                          .appendTo( ul );
+%                           } else {
+                                  return $( '<li>' )
+                                          .append( '<a style="font-size:12px;">' + item.nom + ' ' + item.prenom +' (' + item.email + ')</a>' )
+                                          .appendTo( ul );
+%                           }
+                      }
+                      else
+                      {
+                                  return $( '<li>' )
+                                          .append( 'Aucun contact trouvé')
+                                          .appendTo( ul );
+                      }                                                
+              };
+              
+               
+              
+%         }        
+    
+    
+% # if($ForCreation>0) {    
+          //---- Permet l'ajout d'un client
+          $("#addcustomer").click(function(){
+              //alert ('societe '+ newuser['societe'] + ' nom ' + newuser['nom'] + ' prenom ' + newuser['prenom'] + ' email ' + newuser['email'] + ' phone_pro ' + newuser['phone_pro'] + ' phone_mobile ' + newuser['phone_mobile'] + ' phone_perso ' + newuser['phone_perso']);
+              $.ajax({
+                 url : "<% RT->Config->Get('WebURL') %>NoAuth/CreateUser",
+                 type : 'POST', 
+                 data : 'thirdparty_name=' + newuser['societe'] + '&name=' + newuser['nom'] + '&firstname=' + newuser['prenom'] + '&email=' + newuser['email'] + '&phone_pro=' + newuser['phone_pro']  + '&phone_mobile=' + newuser['phone_mobile'] + '&phone_perso=' + newuser['phone_perso'], 
+                 dataType : 'json',
+                 success : function(json, statut){
+                    if( json.status != 'OK' ) 
+                    {
+                        alert(json.label);
+                    }  
+                    else
+                    {
+                        $('#addcustomer').val( $("<div>").html("'Contact ajout&eacute;").text() );
+                        $('#addcustomer').attr('disabled','disabled');
+                        
+                        if($("#<% $fields->{$reveseCFandFilter{'societe'}} %>").val()==''){
+                          $("#<% $fields->{$reveseCFandFilter{'societe'}} %>").val($("#<% $fields->{$reveseCFandFilter{'nom'}} %>").val()+' '+$("#<% $fields->{$reveseCFandFilter{'prenom'}} %>").val());
+                        }
+                        
+                    }  
+                 },
+                 error : function(resultat, statut, erreur){
+                   
+                 },
+                 complete : function(resultat, statut){
+          
+                 }
+              });   
+             
+         }); 
+% # }         
+    
+    });
+  </script>
+% }
+
+% }
+
+
+% $m->callback( CallbackName => 'AfterCustomFields', Object => $Object,
+%               Grouping => $Grouping, ARGSRef => \%ARGS );
+
+    
+<%INIT>
+$CustomFields ||= $Object->CustomFields;
+$CustomFields->{include_set_initial} = 1 if $ForCreation;
+
+$CustomFields->LimitToGrouping( $Object => $Grouping ) if defined $Grouping;
+
+$m->callback( %ARGS, CallbackName => 'MassageCustomFields', CustomFields => $CustomFields );
+
+$CustomFields->GotoFirstItem;
+my @CustomFields;
+while ( my $CustomField = $CustomFields->Next ) {
+    next unless $CustomField->CurrentUserHasRight('ModifyCustomField')
+             || ($ForCreation && $CustomField->CurrentUserHasRight('SetInitialCustomField'));
+
+    push @CustomFields, $CustomField;
+}
+
+$AsTable ||= $InTable;
+my $FIELD = $AsTable ? 'tr' : 'div';
+my $CELL  = $AsTable ? 'td' : 'div';
+my $WRAP  = '';
+if ( $AsTable ) {
+    $WRAP = 'table' unless $InTable;
+} else {
+    $WRAP = 'div';
+}
+
+</%INIT>
+<%ARGS>
+$Object
+$CustomFields => undef
+$Grouping     => undef
+$AsTable => 1
+$InTable => 0
+$ShowHints => 1
+$ForCreation => 0
+$Queue => undef
+</%ARGS>

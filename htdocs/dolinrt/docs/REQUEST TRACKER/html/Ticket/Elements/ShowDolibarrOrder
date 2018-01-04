@@ -1,0 +1,603 @@
+%# BEGIN BPS TAGGED BLOCK {{{
+%#
+%# END BPS TAGGED BLOCK }}}
+
+% my $ref_command = $Ticket->FirstCustomFieldValue(RT->Config->Get('CFRefCommand'));
+% my $ref_invoice = $Ticket->FirstCustomFieldValue(RT->Config->Get('CFRefFacture'));
+% my $CFandFilter = RT->Config->Get('CFandFilter');
+% my %reveseCFandFilter = reverse %$CFandFilter;
+% my $CFEmail = $reveseCFandFilter{'email'};
+% my $email     = $Ticket->FirstCustomFieldValue($CFEmail);
+
+<style>
+.ui-autocomplete-loading { background: white url('/static/images/ajax_loading_16.gif') right center no-repeat; }
+.buttons
+{
+  display: inline-block !important;
+  background: #eeeeee; /* Old browsers */
+  background: -moz-linear-gradient(top, #eeeeee 0%, #eeeeee 100%) !important; /* FF3.6+ */
+  background: -webkit-gradient(linear, left top, left bottom, color-stop(0%,#eeeeee), color-stop(100%,#eeeeee)) !important; /* Chrome,Safari4+ */
+  background: -webkit-linear-gradient(top, #eeeeee 0%,#eeeeee 100%) !important; /* Chrome10+,Safari5.1+ */
+  background: -o-linear-gradient(top, #eeeeee 0%,#eeeeee 100%) !important; /* Opera11.10+ */
+  background: -ms-linear-gradient(top, #eeeeee 0%,#eeeeee 100%) !important; /* IE10+ */
+  filter: progid:DXImageTransform.Microsoft.gradient( startColorstr='#eeeeee', endColorstr='#eeeeee',GradientType=0 ) !important; /* IE6-9 */
+  background: linear-gradient(top, #eeeeee 0%,#eeeeee 100%) !important; /* W3C */
+  border: 1px solid #a1a1a1 !important;
+  padding: 0 2em !important;
+  font: bold Arial, Helvetica !important;
+  text-decoration: none !important;
+  color: #333 !important;
+  border-radius: .2em !important;
+}
+.buttons:before
+{
+  float: left !important;
+  width: 1em !important;
+  text-align: center !important;
+  font-size: 1.7em !important;
+  margin: 0 0.5em 0 -1em !important;
+  padding: 0 .2em !important;
+  pointer-events: none !important;
+}
+
+
+</style>
+
+
+% #---- Gestion des commandes 
+% if ($ref_invoice) {
+% #---- Gestion des factures si une facture est li&eacute;e 
+      <table>
+        <tr class="date created">
+          <td class="label">&nbsp;</td>\
+          <td id="show-invoice-link" class="value" style="font-size:medium"></td>
+        </tr>
+        
+        <tr class="date created">
+          <td class="label">&nbsp;</td>\
+          <td id="productlist" class="value"></td>
+        </tr>                
+      </table>
+      
+      
+      <script type="text/javascript">  
+        jQuery(document).ready(function($) {  
+              
+              //---- Mise a jour des produits inclus dans la commande
+              $.ajax({
+                 url : "<% RT->Config->Get('WebURL') %>NoAuth/GetInvoiceDetail",
+                 type : 'GET',
+                 data : 'ref_facture=<% $ref_invoice %>&ticket_id=<% $Ticket->Id %>',
+                 success : function(code_html, statut){
+                 
+                    //---- Affiche la liste des produits et l'ensemble des champs n&eacute;cessaires a la gestion de la facture
+                    $(code_html).appendTo("#productlist");
+                    if(document.getElementById("no-invoice") !== null) 
+                    {
+                      $("#download-invoice").hide();
+                    }
+                    
+                    //---- Affiche un lien cliquable vers la facture
+                    if(document.getElementById("invoicelink") !== null)
+                    {
+                      $("#show-invoice-link").html( $("#invoicelink").html() );
+                    } 
+                    
+                    
+                    //---- Autocompletion sur le champ de recherche des produits vendus   
+                    $("#refproduit").autocomplete({
+                            source: "<% RT->Config->Get('WebURL') %>NoAuth/SearchProductOrService",
+                            minLength: 1,
+                            select: function( event, ui ) {
+                                if( ui.item ) {                            
+                                  $("#refproduit").val(ui.item.ref);
+                                  $("#productid").val(ui.item.id);
+                                }
+                              return false;
+                            }
+                    }).data( "ui-autocomplete" )._renderItem = function( ul, item ) {
+                            return $( '<li>' )
+                                    .append( '<a style="font-size:12px;">' + item.ref + ' : ' + item.label +'</a>' )
+                                    .appendTo( ul );              
+                    };
+                        
+                        
+                    //---- Ajout du produit et mise a jour des produits inclus dans la facture
+                    $("#invoiceaddproduct").click(function(){
+                         
+                        //---- Ajoute un produit dans la facture
+                        $.ajax({
+                           url : "<% RT->Config->Get('WebURL') %>NoAuth/UpdateInvoice",
+                           type : 'POST', 
+                           data : 'productid=' + $("#productid").val() + '&qty=' + $("#qty").val() + '&ref_facture=<% $ref_invoice %>&ticket_id=<% $Ticket->Id %>&ticket_subject=<% $Ticket->Subject() %>', 
+                           dataType : 'json',
+                           success : function(json, statut){
+                              if( json.error ) 
+                              {
+                                  alert(json.error);
+                              }  
+                              else if( json.ref ) 
+                              {
+                                  location.reload();
+                              }  
+                           },
+                           error : function(resultat, statut, erreur){
+                             
+                           },
+                           complete : function(resultat, statut){
+                    
+                           }
+                        });
+                       
+                    });
+                        
+                    //---- Permet de changer le statut de la facture
+                    $("#changeinvoicestatus").click(function(){
+                    
+                        if(typeof( $("#selectpaiements option:selected").val() ) != 'undefined' && $("#selectpaiements option:selected").val() > 0)
+                        {
+                          $.ajax({
+                             url : "<% RT->Config->Get('WebURL') %>NoAuth/UpdateInvoice",
+                             type : 'POST', 
+                             data : 'status=' + $("#invoicestatus").val() + '&ref_facture=<% $ref_invoice %>&ticket_id=<% $Ticket->Id %>&ticket_subject=<% $Ticket->Subject() %>&mode_reglement_id='+$("#selectpaiements option:selected").val()+'&cond_reglement_id='+$("#selectconditions option:selected").val(), 
+                             dataType : 'json',
+                             success : function(json, statut){
+                                if( json.error ) 
+                                {
+                                    alert(json.error);
+                                }  
+                                else if( json.ref ) 
+                                {
+                                    location.reload();
+                                }  
+                             },
+                             error : function(resultat, statut, erreur){
+                               
+                             },
+                             complete : function(resultat, statut){
+                      
+                             }
+                          });
+                        }
+                        else
+                        {
+                          e.preventDefault();
+                          alert("Le mode de paiement n'est pas valide");
+                        }
+                       
+                   });
+                  
+                   
+                  //---- Affiche les moyens de paiement disponibles
+                  if(document.getElementById("paiementtype") !== null) {
+                    $.ajax({
+                       url : "<% RT->Config->Get('WebURL') %>NoAuth/GetPaiementsType",
+                       type : 'POST', 
+                       dataType : 'html',
+                       data : 'ref_invoice=<% $ref_invoice %>',
+                       success : function(html, statut){
+                         $("#paiementtype").html(html);   
+                       },
+                       error : function(resultat, statut, erreur){
+                
+                       },
+                       complete : function(resultat, statut){
+                
+                       }
+                    });
+                  }
+                   
+                   
+                   //---- Permet de supprimer un item de la facture
+                  $("[id^=deleteitem_]").click(function(){
+                        var itemToDeleteId = $(this).attr('id').replace("deleteitem_","");
+                        $.ajax({
+                           url : "<% RT->Config->Get('WebURL') %>NoAuth/UpdateInvoice",
+                           type : 'POST', 
+                           data : 'delete_item_id=' + itemToDeleteId + '&ref_facture=<% $ref_invoice %>&ticket_id=<% $Ticket->Id %>&ticket_subject=<% $Ticket->Subject() %>', 
+                           dataType : 'json',
+                           success : function(json, statut){
+                              if( json.result_code != 'OK' ) 
+                              {
+                                  alert(json.result_code);
+                              }  
+                              else
+                              {
+                                  location.reload();
+                              }  
+                           },
+                           error : function(resultat, statut, erreur){
+                             
+                           },
+                           complete : function(resultat, statut){
+                    
+                           }
+                        });
+                       
+                   });
+                     
+                                           
+                 },
+                 error : function(resultat, statut, erreur){
+                   
+                 },
+                 complete : function(resultat, statut){
+          
+                 }
+              });
+      
+              
+         });
+      </script>
+
+
+
+% } elsif ($ref_command) {
+
+
+      <table>
+        <tr class="date created">
+          <td class="label">&nbsp;</td>\
+          <td id="message" class="value" style="font-size:medium"></td>
+        </tr>
+        
+        <tr class="date created">
+          <td class="label">&nbsp;</td>\
+          <td id="productlist" class="value"></td>
+        </tr>
+               
+      </table>
+      
+      
+      <script type="text/javascript">  
+        jQuery(document).ready(function($) {  
+        
+              //---- Mise a jour des produits inclus dans la commande
+              $.ajax({
+                 url : "<% RT->Config->Get('WebURL') %>NoAuth/GetOrderDetail",
+                 type : 'GET',
+                 data : 'ref_command=<% $ref_command %>',
+                 success : function(code_html, statut){
+                      $(code_html).appendTo("#productlist"); 
+                      if(document.getElementById("no-order") !== null) 
+                      {
+                        $("#download-order").hide();
+                      }
+                      
+                      //---- Affiche un lien cliquable vers la facture
+                      if(document.getElementById("orderlink") !== null)
+                      {
+                        $("#message").html( $("#orderlink").html() );
+                      } 
+                     
+                      //---- Ajoute le contact lors de la cr&eacute;ation d'une facture
+%                     if($email =~ /\w+\@\w+/) {              
+                          $.ajax({
+                             url : "<% RT->Config->Get('WebURL') %>NoAuth/SearchContact?filter=email",
+                             type : 'POST', 
+                             data : 'term=<% $email %>', 
+                             dataType : 'json',
+                             success : function(json, statut){
+                                $.each(json, function (index, item) {
+                                    if( item.id>-1 && item.societe && item.socid ) 
+                                    {
+                                        $("#contact_id").val(item.id);
+                                    }
+                                    else
+                                    {
+                                        if(item.id==-1)
+                                        {
+                                          var message = $('#message').html();
+                                          $('#message').html(message + '<br>/!\\ : Aucune contact dolibar associ&eacute; a <% $email %>.');
+                                          $('#createinvoicefromorder').html('<strong>Impossible de cr&eacute;er une facture</strong>');
+                                          $('#createinvoicefromorder').click(function(e) {
+                                              e.preventDefault();
+                                              alert("Corriger le champ personalis&eacute; contenant l'E-mail avant de pouvoir cr&eacute;er une facture");
+                                          });
+                                        }
+                                    }   
+                                });             
+                             },
+                             error : function(resultat, statut, erreur){
+                               
+                             },
+                             complete : function(resultat, statut){
+                      
+                             }
+                          });
+%                     }                                    
+                      
+                      
+                      //---- Autocompletion sur le champ de recherche des produits vendus   
+                      $("#refproduit").autocomplete({
+                              source: "<% RT->Config->Get('WebURL') %>NoAuth/SearchProductOrService",
+                              minLength: 1,
+                              select: function( event, ui ) {
+                                  if( ui.item ) {                            
+                                    $("#refproduit").val(ui.item.ref);
+                                    $("#productid").val(ui.item.id);
+                                  }
+                                return false;
+                              }
+                      }).data( "ui-autocomplete" )._renderItem = function( ul, item ) {
+                              return $( '<li>' )
+                                      .append( '<a style="font-size:12px;">' + item.ref + ' : ' + item.label +'</a>' )
+                                      .appendTo( ul );              
+                      };
+                      
+                      
+                      //---- Ajout du produit et mise a jour des produits inclus dans la commande
+                      $("#orderaddproduct").click(function(){
+                      
+                        
+                        //---- Ajoute un produit dans la commande
+                        $.ajax({
+                           url : "<% RT->Config->Get('WebURL') %>NoAuth/UpdateOrder",
+                           type : 'POST', 
+                           data : 'productid=' + $("#productid").val() + '&qty=' + $("#qty").val() + '&ref_command=<% $ref_command %>', 
+                           dataType : 'json',
+                           success : function(json, statut){
+                              if( json.error ) 
+                              {
+                                  alert(json.error);
+                              }  
+                              else if( json.ref ) 
+                              {
+                                  location.reload();
+                              }  
+                           },
+                           error : function(resultat, statut, erreur){
+                             
+                           },
+                           complete : function(resultat, statut){
+                    
+                           }
+                        });     
+                          
+                         
+                      });
+                      
+                      
+                      //---- Permet de supprimer un item de la facture
+                      $("[id^=deleteitem_]").click(function(){
+                            var itemToDeleteId = $(this).attr('id').replace("deleteitem_","");
+                            $.ajax({
+                               url : "<% RT->Config->Get('WebURL') %>NoAuth/UpdateOrder",
+                               type : 'POST', 
+                               data : 'delete_item_id=' + itemToDeleteId + '&ref_command=<% $ref_command %>', 
+                               dataType : 'json',
+                               success : function(json, statut){
+                                  if( json.result_code != 'OK' ) 
+                                  {
+                                      alert(json.result_code);
+                                  }  
+                                  else
+                                  {
+                                      location.reload();
+                                  }  
+                               },
+                               error : function(resultat, statut, erreur){
+                                 
+                               },
+                               complete : function(resultat, statut){
+                        
+                               }
+                            });
+                           
+                       });
+                       
+                       
+                       //---- Permet de changer le statut de la facture
+                      $("#createinvoicefromorder").click(function(){
+                          $.ajax({
+                             url : "<% RT->Config->Get('WebURL') %>NoAuth/UpdateOrder",
+                             type : 'POST', 
+                             data : 'ticket_id=<% $Ticket->Id %>&contact_id='+$("#contact_id").val()+'&status=createinvoicefromorder&ref_command=<% $ref_command %>', 
+                             dataType : 'json',
+                             success : function(json, statut){
+                                if( json.error ) 
+                                {
+                                    alert(json.error);
+                                }  
+                                else if( json.ref ) 
+                                {
+                                    location.reload();
+                                }  
+                             },
+                             error : function(resultat, statut, erreur){
+                               
+                             },
+                             complete : function(resultat, statut){
+                      
+                             }
+                          });
+                         
+                     });
+                                          
+                 },
+                 error : function(resultat, statut, erreur){
+                   
+                 },
+                 complete : function(resultat, statut){
+          
+                 }
+              });
+      
+              
+         });
+      </script>
+
+% } else {
+% #---- Gestion des factures si aucune commande n'est li&eacute;e, ni aucune facture 
+  <table>
+    <tr class="date created">
+      <td class="label">&nbsp;</td>\
+      <td id="message" class="">Aucune r&eacute;f&eacute;rence de commande n'est renseign&eacute;e dans le champ "<% RT->Config->Get('CFRefCommand') %>"</td>
+    </tr>
+    <tr class="date created">
+      <td class="label">Client : </td>\
+      <td class="value">
+        <input type="hidden" name="contact_id" id="contact_id" value="">
+        <input type="hidden" name="thirdparty_id" id="thirdparty_id" value="">
+        <input type="hidden" name="thirdparty" id="thirdparty" size="30" class="thirdparty" value="">
+        <input type="text" name="customer" id="customer" size="30" class="customer" value="" disabled>
+      </td>
+    </tr>
+    <tr class="date created">
+      <td class="label">Date facturation : </td>\
+      <td class="value">
+        <input type="text" class="" id="datefacturation" name="datefacturation" value="" size="30">
+      </td>
+    </tr>
+    <tr class="date created">
+      <td class="label">Moyen de paiement : </td>\
+      <td id="paiementtype" class="value">
+      </td>
+    </tr>
+    <tr class="date created">
+      <td class="label">&nbsp;</td>\
+      <td class="value"><input type="submit" value="Cr&eacute;er une facture" name="createinvoice" id="createinvoice"></td>
+    </tr>
+  </table>
+  
+% #---- Listener permettant la recherche de la societe
+   <style>
+     .ui-autocomplete-loading { background: white url('/static/images/ajax_loading_16.gif') right center no-repeat; }
+   </style>
+   <script type="text/javascript">  
+        jQuery(document).ready(function($) {
+                          
+              //---- Ajoute le contact lors de la cr&eacute;ation d'une facture
+%          if($email =~ /\w+\@\w+/) {              
+              $.ajax({
+                 url : "<% RT->Config->Get('WebURL') %>NoAuth/SearchContact?filter=email",
+                 type : 'POST', 
+                 data : 'term=<% $email %>', 
+                 dataType : 'json',
+                 success : function(json, statut){
+                    $.each(json, function (index, item) {
+                        if( item.id>-1 && item.societe && item.socid ) 
+                        {
+                            $("#thirdparty").val(item.societe);
+                            $("#thirdparty_id").val(item.socid);
+                            $("#contact_id").val(item.id);
+                            $("#customer").val(item.nom+' '+item.prenom);
+                        }
+                        else
+                        {
+                            if(item.id==-1)
+                            {
+                              var message = $('#message').html();
+                              $('#message').html(message + '<br><strong>Aucune contact dolibar associ&eacute; a <% $email %><strong>.');
+                              $('#createinvoice').val('Impossible de cr&eacute;er une facture');
+                              $('#createinvoice').attr('disabled','disabled');
+                            }
+                            else
+                            {
+                              var message = $('#message').html();
+                              $('#message').html(message + '<br><strong>Aucune soci&eacute;t&eacute; li&eacute;e a <% $email %><strong>.');
+                              $('#createinvoice').val('Impossible de cr&eacute;er une facture');
+                              $('#createinvoice').attr('disabled','disabled');
+                            }
+                        }   
+                    });             
+                 },
+                 error : function(resultat, statut, erreur){
+                   
+                 },
+                 complete : function(resultat, statut){
+          
+                 }
+              });
+%           }              
+          
+        
+              //---- Gestion du datepicker
+              var currentDate = new Date(); 
+              $("#datefacturation").datepicker({ dateFormat: 'dd/mm/yy' });
+              $("#datefacturation").datepicker('setDate', currentDate);
+
+              
+              //---- Affiche les moyens de paiement disponibles
+              $.ajax({
+                 url : "<% RT->Config->Get('WebURL') %>NoAuth/GetPaiementsType",
+                 type : 'POST', 
+                 dataType : 'html',
+                 success : function(html, statut){
+                   $("#paiementtype").html(html);   
+                 },
+                 error : function(resultat, statut, erreur){
+          
+                 },
+                 complete : function(resultat, statut){
+          
+                 }
+              });
+        
+        
+              //---- Autocompletion sur le CP societe
+           /*   $("#customer").autocomplete({
+                      source: "<% RT->Config->Get('WebURL') %>NoAuth/SearchContact?filter=nom",
+                      minLength: 3,
+                      select: function( event, ui ) {
+                          if( ui.item && ui.item.id>-1 ) {                            
+                            $("#thirdparty").val(ui.item.societe);
+                            $("#thirdparty_id").val(ui.item.socid);
+                            $("#contact_id").val(ui.item.id);
+                            $("#customer").val(ui.item.nom+' '+ui.item.prenom);
+                          }
+                          return false;
+                      }
+              }).data( "ui-autocomplete" )._renderItem = function( ul, item ) {           
+                      return $( '<li>' )
+                              .append( '<a style="font-size:12px;">' + item.societe + '</a>' )
+                              .appendTo( ul );           
+              };   */
+              
+              //---- Creation de la facture
+              $("#createinvoice").click(function(){
+                  if(typeof( $("#selectpaiements option:selected").val() ) != 'undefined')
+                  {
+                    //alert($("#selectpaiements option:selected").val());
+                     $.ajax({
+                       url : "<% RT->Config->Get('WebURL') %>NoAuth/CreateInvoice",
+                       type : 'POST', 
+                       data : 'account_id='+$("#selectaccountid option:selected").val()+'&cond_reglement_id='+$("#selectconditions option:selected").val()+'&paiement_type='+$("#selectpaiements option:selected").val()+'&contact_id=' + $("#contact_id").val() + '&thirdparty_id=' + $("#thirdparty_id").val() + '&datefacturation=' + $("#datefacturation").val() + '&ticket_id=<% $Ticket->Id %>&ticket_subject=<% $Ticket->Subject() %>', 
+                       dataType : 'json',
+                       success : function(json, statut){
+                          if( json.error ) 
+                          {
+                              alert(json.error);
+                          }  
+                          else if( json.ref ) 
+                          {
+                              location.reload();
+                          }  
+                       },
+                       error : function(resultat, statut, erreur){
+                
+                       },
+                       complete : function(resultat, statut){
+                
+                       }
+                    });   
+                   
+                  }
+                  else
+                  {
+                    alert("Le mode de paiement n'est pas renseigné");
+                  }
+                 
+              });
+
+         });
+    </script>  
+  
+% }
+
+<%ARGS>
+$Ticket => undef
+</%ARGS>
+<%INIT>
+
+</%INIT>
