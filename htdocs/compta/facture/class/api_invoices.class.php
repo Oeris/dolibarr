@@ -959,7 +959,7 @@ class Invoices extends DolibarrApi
      *
      * The model schema is defined by the PaymentData class.
      *
-     * @param int     $id                               Id of invoice
+     * @param array   $ids                {@from body}  Id of invoice	    {@type int}
      * @param string  $datepaye 	  {@from body}  Payment date        {@type timestamp}
      * @param int     $paiementid 	  {@from body}  Payment mode Id {@min 1}
      * @param string  $closepaidinvoices  {@from body}  Close paid invoices {@choice yes,no}
@@ -969,14 +969,14 @@ class Invoices extends DolibarrApi
      * @param string  $chqemetteur        {@from body}  Payment issuer (mandatory if paiementcode = 'CHQ')
      * @param string  $chqbank            {@from body}  Issuer bank name (optional)
      *
-     * @url     POST {id}/payments
+     * @url     POST /payments
      *
-     * @return int  Payment ID
+     * @return array  Payment ID
      * @throws 400
      * @throws 401
      * @throws 404
      */
-    function addPayment($id, $datepaye, $paiementid, $closepaidinvoices, $accountid, $num_paiement='', $comment='', $chqemetteur='', $chqbank='') {
+    function addPayment($ids, $datepaye, $paiementid, $closepaidinvoices, $accountid, $num_paiement='', $comment='', $chqemetteur='', $chqbank='') {
         global $conf;
 
         require_once DOL_DOCUMENT_ROOT . '/compta/paiement/class/paiement.class.php';
@@ -984,55 +984,60 @@ class Invoices extends DolibarrApi
         if(! DolibarrApiAccess::$user->rights->facture->creer) {
                 throw new RestException(401);
         }
-        if(empty($id)) {
+
+	foreach($ids as $id) {
+
+            if(empty($id)) {
                 throw new RestException(400, 'Invoice ID is mandatory');
-        }
-
-        if( ! DolibarrApi::_checkAccessToResource('facture',$id)) {
-                throw new RestException(401, 'Access not allowed for login '.DolibarrApiAccess::$user->login);
-        }
-
-        $request_data = (object) $payment_data;
-
-        if (! empty($conf->banque->enabled)) {
-            if(empty($accountid)) {
-                throw new RestException(400, 'Account ID is mandatory');
             }
-        }
 
-        if(empty($paiementid)) {
-            throw new RestException(400, 'Paiement ID or Paiement Code is mandatory');
-        }
+            if( ! DolibarrApi::_checkAccessToResource('facture',$id)) {
+                throw new RestException(401, 'Access not allowed for login '.DolibarrApiAccess::$user->login);
+            }
+
+            $request_data = (object) $payment_data;
+
+            if (! empty($conf->banque->enabled)) {
+                if(empty($accountid)) {
+                    throw new RestException(400, 'Account ID is mandatory');
+                }
+            }
+
+            if(empty($paiementid)) {
+                throw new RestException(400, 'Paiement ID or Paiement Code is mandatory');
+            }
 
 
-        $result = $this->invoice->fetch($id);
-        if( ! $result ) {
-            throw new RestException(404, 'Invoice not found');
-        }
+            $result = $this->invoice->fetch($id);
+            if( ! $result ) {
+                throw new RestException(404, 'Invoice not found');
+            }
 
-        // Calculate amount to pay
-        $totalpaye = $this->invoice->getSommePaiement();
-        $totalcreditnotes = $this->invoice->getSumCreditNotesUsed();
-        $totaldeposits = $this->invoice->getSumDepositsUsed();
-        $resteapayer = price2num($this->invoice->total_ttc - $totalpaye - $totalcreditnotes - $totaldeposits, 'MT');
+            // Calculate amount to pay
+            $totalpaye = $this->invoice->getSommePaiement();
+            $totalcreditnotes = $this->invoice->getSumCreditNotesUsed();
+            $totaldeposits = $this->invoice->getSumDepositsUsed();
+            $resteapayer = price2num($this->invoice->total_ttc - $totalpaye - $totalcreditnotes - $totaldeposits, 'MT');
+
+            // Clean parameters amount if payment is for a credit note
+            if ($this->invoice->type == Facture::TYPE_CREDIT_NOTE) {
+                $resteapayer = price2num($resteapayer,'MT');
+                $amounts[$id] = -$resteapayer;
+                // Multicurrency
+                $newvalue = price2num($this->invoice->multicurrency_total_ttc,'MT');
+                $multicurrency_amounts[$id] = -$newvalue;
+            } else {
+                $resteapayer = price2num($resteapayer,'MT');
+                $amounts[$id] = $resteapayer;
+                // Multicurrency
+                $newvalue = price2num($this->invoice->multicurrency_total_ttc,'MT');
+                $multicurrency_amounts[$id] = $newvalue;
+            }
+
+	}
+
 
         $this->db->begin();
-        // Clean parameters amount if payment is for a credit note
-        if ($this->invoice->type == Facture::TYPE_CREDIT_NOTE) {
-            $resteapayer = price2num($resteapayer,'MT');
-            $amounts[$id] = -$resteapayer;
-            // Multicurrency
-            $newvalue = price2num($this->invoice->multicurrency_total_ttc,'MT');
-            $multicurrency_amounts[$id] = -$newvalue;
-        } else {
-            $resteapayer = price2num($resteapayer,'MT');
-            $amounts[$id] = $resteapayer;
-            // Multicurrency
-            $newvalue = price2num($this->invoice->multicurrency_total_ttc,'MT');
-            $multicurrency_amounts[$id] = $newvalue;
-        }
-
-
         // Creation of payment line
         $paiement = new Paiement($this->db);
         $paiement->datepaye     = $datepaye;
